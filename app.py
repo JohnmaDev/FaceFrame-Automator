@@ -67,62 +67,54 @@ def resize_to_fill(
     offset_y: int = 0,
 ) -> Image.Image:
     """
-    Redimensiona y recorta una imagen para que llene exactamente el tamaño
-    objetivo (lógica 'cover'), con control de zoom y desplazamiento.
+    Redimensiona la imagen y la ubica en un lienzo (canvas) transparente.
+    Permite mover la foto libremente, incluso fuera de los bordes.
 
-    Estrategia:
-        1. Escala la imagen para cubrir el target (cover).
-        2. Aplica el factor de zoom adicional.
-        3. Aplica el desplazamiento offset_x / offset_y sobre el punto de recorte
-           para permitir al usuario alinear el rostro con la ventana del marco.
+    Estrategia "Canvas Libre":
+        1. Escala la imagen para cubrir el target (cover) × zoom del usuario.
+        2. Crea un lienzo RGBA transparente del tamaño `target_size`.
+        3. Calcula la posición para centrar la imagen escalada en el lienzo.
+        4. Suma `offset_x` y `offset_y` a esa posición para el desplazamiento libre.
+        5. Pega la imagen en el lienzo.
 
     Args:
         image:       Imagen PIL a redimensionar.
         target_size: Tupla (ancho, alto) del tamaño objetivo.
-        zoom:        Factor de zoom adicional (1.0 = sin zoom extra).
-                     Valores > 1.0 acercan, < 1.0 alejan (mínimo cover).
-        offset_x:    Desplazamiento horizontal en píxeles del punto de recorte.
-                     Positivo → mueve la foto hacia la derecha visible.
-                     Negativo → mueve la foto hacia la izquierda visible.
-        offset_y:    Desplazamiento vertical en píxeles del punto de recorte.
-                     Positivo → mueve la foto hacia abajo visible.
-                     Negativo → mueve la foto hacia arriba visible.
+        zoom:        Factor de zoom (1.0 = tamaño base).
+        offset_x:    Píxeles de desplazamiento horizontal (sin límites).
+        offset_y:    Píxeles de desplazamiento vertical (sin límites).
 
     Returns:
-        PIL.Image.Image redimensionada y recortada al target_size.
-
-    # FASE 2 - CENTRADO DE ROSTROS:
-    # Reemplazar offset_x / offset_y por los valores obtenidos de
-    # `detect_face_center(image)` para centrado automático.
-    # Ejemplo:
-    #   face_x, face_y = detect_face_center(image)
-    #   offset_x = face_x - (new_w // 2)
-    #   offset_y = face_y - (new_h // 2)
+        PIL.Image.Image del tamaño target_size (modo RGBA).
     """
     target_w, target_h = target_size
     orig_w, orig_h = image.size
 
-    # Escala base (cover) + zoom adicional del usuario
+    # 1. Escala base (cover) × zoom del usuario
     base_scale = max(target_w / orig_w, target_h / orig_h)
-    scale = base_scale * max(zoom, 1.0)  # nunca bajar del cover mínimo
+    scale = base_scale * max(zoom, 1.0)
     new_w = int(orig_w * scale)
     new_h = int(orig_h * scale)
 
-    # Redimensionar con alta calidad
     resized = image.resize((new_w, new_h), Image.LANCZOS)
+    if resized.mode != 'RGBA':
+        resized = resized.convert('RGBA')
 
-    # Recorte con desplazamiento: el offset mueve la "ventana" de recorte
-    # Clamp para no salir de los límites de la imagen escalada
-    center_x = new_w // 2 - offset_x
-    center_y = new_h // 2 - offset_y
+    # 2. Crear lienzo transparente
+    canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
 
-    left  = max(0, min(center_x - target_w // 2, new_w - target_w))
-    top   = max(0, min(center_y - target_h // 2, new_h - target_h))
-    right  = left + target_w
-    bottom = top  + target_h
+    # 3. Posición base (centrada)
+    base_x = (target_w - new_w) // 2
+    base_y = (target_h - new_h) // 2
 
-    cropped = resized.crop((left, top, right, bottom))
-    return cropped
+    # 4. Sumar el desplazamiento manual del usuario
+    final_x = base_x + offset_x
+    final_y = base_y + offset_y
+
+    # 5. Pegar la imagen en el lienzo (el canal alfa se respeta)
+    canvas.paste(resized, (final_x, final_y), resized)
+
+    return canvas
 
 
 def overlay_frame(
@@ -301,30 +293,31 @@ def render_settings_section() -> dict:
     # detección automática de rostros.
     with st.expander("🎯 Ajuste de posición de la foto", expanded=True):
         st.caption(
-            "Mueve los controles para centrar el rostro dentro de la ventana del marco. "
-            "Los cambios se reflejan al hacer clic en **Previsualizar**."
+            "Mueve la foto libremente en cualquier dirección. "
+            "Si te sales del marco, verás el fondo transparente."
         )
         col_zoom, col_empty = st.columns([1, 1])
         with col_zoom:
             zoom = st.slider(
                 "🔍 Zoom de la foto",
-                min_value=1.0, max_value=3.0, value=1.0, step=0.05,
-                help="Acerca (>1.0) o deja al tamaño mínimo (1.0) la foto del conductor.",
+                min_value=0.5, max_value=3.0, value=1.0, step=0.05,
+                help="Puedes alejar (<1.0) o acercar (>1.0) la foto.",
             )
 
         col_ox, col_oy = st.columns(2)
-        max_offset = int(max(output_w, output_h))
+        # Permitimos mover la foto una distancia igual al tamaño del canvas
+        max_pan = int(max(output_w, output_h))
         with col_ox:
             offset_x = st.slider(
-                "↔️ Mover foto horizontalmente",
-                min_value=-max_offset, max_value=max_offset, value=0, step=5,
-                help="Positivo: mueve la foto a la derecha. Negativo: a la izquierda.",
+                "↔️ Posición horizontal",
+                min_value=-max_pan, max_value=max_pan, value=0, step=5,
+                help="Mueve la foto hacia la izquierda o derecha libremente.",
             )
         with col_oy:
             offset_y = st.slider(
-                "↕️ Mover foto verticalmente",
-                min_value=-max_offset, max_value=max_offset, value=0, step=5,
-                help="Positivo: mueve la foto hacia abajo. Negativo: hacia arriba.",
+                "↕️ Posición vertical",
+                min_value=-max_pan, max_value=max_pan, value=0, step=5,
+                help="Mueve la foto hacia arriba o abajo libremente.",
             )
 
     return {
@@ -337,15 +330,23 @@ def render_settings_section() -> dict:
 
 def render_process_section(frame_file, photo_file, settings: dict):
     """
-    Renderiza los botones de procesamiento/previsualización y la sección de descarga.
+    Renderiza la sección de procesamiento en TIEMPO REAL y descarga.
 
-    Flujo de dos pasos:
-        1. "⚡ Previsualizar" — genera la composición con los ajustes actuales
-           y la muestra en pantalla. No descarga nada. Permite iterar la posición.
-        2. "⬇️ Descargar" — aparece bajo la preview lista para exportar.
+    v1.3 — Preview automático:
+        Cuando ambas imágenes están cargadas, la composición se genera
+        automáticamente en cada interacción (cada vez que el usuario mueve
+        un slider o cambia un ajuste). No requiere botón "Previsualizar".
 
-    El estado de la imagen procesada se guarda en `st.session_state` para que
-    persista entre interacciones de Streamlit sin re-procesar innecesariamente.
+        Estrategia de cache por settings-key:
+        - Se calcula una clave con los settings actuales.
+        - Si la clave coincide con la última procesada, se reutiliza el resultado
+          de session_state sin re-procesar (evita trabajo redundante).
+        - Si la clave cambia (usuario movió un slider), se re-procesa.
+
+        Esto garantiza que:
+        1. El preview siempre refleja los ajustes actuales.
+        2. El botón de descarga siempre corresponde al resultado visible.
+        3. No se re-procesa si nada cambió.
 
     Args:
         frame_file: UploadedFile del marco (puede ser None).
@@ -357,73 +358,75 @@ def render_process_section(frame_file, photo_file, settings: dict):
     offset_x    = settings["offset_x"]
     offset_y    = settings["offset_y"]
 
-    st.subheader("🚀 Paso 3: Previsualizar y Exportar")
+    st.subheader("🚀 Paso 3: Preview en tiempo real y Exportar")
 
     files_ready = frame_file is not None and photo_file is not None
 
-    col_btn1, col_btn2 = st.columns([1, 1])
-    with col_btn1:
-        preview_btn = st.button(
-            "👁️ Previsualizar",
-            type="primary",
-            disabled=not files_ready,
-            help="Genera la composición con los ajustes actuales para revisarla antes de exportar.",
-            use_container_width=True,
-        )
-    with col_btn2:
-        reset_btn = st.button(
-            "🔄 Limpiar",
-            disabled="result_image" not in st.session_state,
-            help="Borra la previsualización actual.",
-            use_container_width=True,
-        )
-
-    if reset_btn:
+    # Botón de reset (única acción manual que queda)
+    if st.button(
+        "🔄 Limpiar resultado",
+        disabled="result_image" not in st.session_state,
+        help="Borra el resultado actual.",
+    ):
         st.session_state.pop("result_image", None)
+        st.session_state.pop("result_bytes", None)
+        st.session_state.pop("result_settings", None)
         st.rerun()
 
-    if preview_btn:
-        if not files_ready:
-            st.warning("⚠️ Por favor, carga tanto el marco como la foto del conductor.")
+    if not files_ready:
+        st.info("📂 Carga el marco y la foto del conductor para ver el preview en tiempo real.")
+        return
+
+    # --- Cache por settings-key: solo re-procesa si algo cambió ---
+    current_key = (output_size, zoom, offset_x, offset_y)
+    cached_key  = st.session_state.get("result_settings")
+
+    if cached_key != current_key:
+        # Los ajustes cambiaron (o es la primera vez): procesar
+        frame_img = load_image(frame_file)
+        photo_img = load_image(photo_file)
+
+        if frame_img is None or photo_img is None:
+            st.error("❌ No se pudieron cargar las imágenes. Verifica los archivos.")
             return
 
-        with st.spinner("Generando previsualización..."):
-            # Cargar imágenes desde los archivos subidos
-            frame_img = load_image(frame_file)
-            photo_img = load_image(photo_file)
+        result_image = overlay_frame(
+            photo_img, frame_img,
+            output_size=output_size,
+            zoom=zoom,
+            offset_x=offset_x,
+            offset_y=offset_y,
+        )
 
-            if frame_img is None or photo_img is None:
-                st.error("❌ No se pudieron cargar las imágenes. Verifica los archivos.")
-                return
+        img_bytes = export_image_to_bytes(result_image, fmt=OUTPUT_FORMAT)
+        st.session_state["result_image"]    = result_image
+        st.session_state["result_bytes"]    = img_bytes
+        st.session_state["result_settings"] = current_key
 
-            # Procesamiento core: superposición con ajustes de posición
-            result_image = overlay_frame(
-                photo_img, frame_img,
-                output_size=output_size,
-                zoom=zoom,
-                offset_x=offset_x,
-                offset_y=offset_y,
-            )
-
-            # Guardar en session_state para persistencia entre re-renders
-            st.session_state["result_image"] = result_image
-
-    # --- Previsualización y Descarga ---
-    if "result_image" in st.session_state and st.session_state["result_image"] is not None:
+    # --- Preview y Descarga ---
+    if "result_image" in st.session_state:
         st.divider()
-        render_preview_and_download(st.session_state["result_image"])
+        render_preview_and_download(
+            st.session_state["result_image"],
+            st.session_state["result_bytes"],
+        )
 
 
-def render_preview_and_download(result_image: Image.Image):
+def render_preview_and_download(result_image: Image.Image, img_bytes: bytes):
     """
     Renderiza el área de previsualización y el botón de descarga.
 
+    FIX v1.2: Los bytes se reciben como parámetro (pre-calculados y guardados
+    en session_state) en lugar de calcularse aquí. Esto garantiza que el
+    st.download_button siempre recibe exactamente los mismos bytes sin importar
+    cuántas veces Streamlit re-renderice la página al hacer clic en el botón.
+
     Args:
         result_image: PIL.Image.Image con la composición final.
+        img_bytes:    bytes pre-serializados listos para descarga.
     """
     st.subheader("🔍 Previsualización del Resultado")
 
-    # Mostrar imagen centrada con ancho limitado para previsualización
     col_preview, col_info = st.columns([2, 1])
 
     with col_preview:
@@ -443,9 +446,7 @@ def render_preview_and_download(result_image: Image.Image):
             "con canal alfa preservado."
         )
 
-        # Serializar imagen para descarga
-        img_bytes = export_image_to_bytes(result_image, fmt=OUTPUT_FORMAT)
-
+        # Los bytes ya están pre-calculados: el botón es estable entre re-renders
         st.download_button(
             label="⬇️ Descargar Imagen",
             data=img_bytes,
