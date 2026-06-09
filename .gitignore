@@ -1,0 +1,39 @@
+# =============================================================================
+# FaceFrame Automator - .gitignore
+# =============================================================================
+
+# --- Entorno virtual de Python ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Caché de Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- Imágenes de prueba / salida local ---
+# Descomenta si no quieres subir imágenes de prueba:
+# *.jpg
+# *.jpeg
+# *.png
+
+# --- Archivos del sistema operativo ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDEs y editores ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Archivos temporales ---
+*.log
+*.tmp

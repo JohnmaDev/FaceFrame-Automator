@@ -1,0 +1,21 @@
+# =============================================================================
+# FaceFrame Automator - requirements.txt
+# =============================================================================
+# Dependencias del MVP (Fase 1)
+# Instalar con: pip install -r requirements.txt
+
+# --- Core (Fase 1 - MVP) ---
+streamlit>=1.35.0       # Interfaz de usuario web local
+Pillow>=10.3.0          # Procesamiento y manipulación de imágenes
+
+# =============================================================================
+# Dependencias opcionales para Fase 2 (descomentar cuando se implementen)
+# =============================================================================
+
+# --- Fase 2B: Detección de Rostros con IA ---
+# opencv-python>=4.9.0    # Detección de rostros con Haar Cascades (ligero)
+# mediapipe>=0.10.0       # Detección de rostros con ML (más preciso)
+
+# --- Fase 2C: Manipulación de Fondos ---
+# opencv-python>=4.9.0    # Segmentación de color HSV (si no está ya instalado)
+# rembg>=2.0.50           # Remoción de fondo con IA (alternativa a OpenCV)
